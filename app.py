@@ -1,41 +1,42 @@
-# app.py
-
 import streamlit as st
 from PIL import Image
 from backend.ocr import (
-    initialize_reader, 
-    preprocess_image, 
-    perform_ocr, 
-    group_lines_by_row, 
-    parse_merged_lines
+    initialize_reader,
+    preprocess_image,
+    perform_ocr,
+    group_lines_by_row
 )
 from frontend.display import show_uploaded_image, display_ocr_data
 
-st.title("Enhanced OCR for French Receipts")
+def main():
+    """Lance l'application OCR pour reçus français avec EasyOCR dans Streamlit."""
+    st.title("OCR amélioré pour reçus français")
 
-# 1. File uploader
-uploaded_file = st.file_uploader("Upload a receipt image", type=["png", "jpg", "jpeg"])
+    # Téléchargeur de fichier
+    uploaded_file = st.file_uploader("Téléchargez une image de reçu", type=["png", "jpg", "jpeg"])
 
-if uploaded_file is not None:
-    # 2. Display the original image
-    image = show_uploaded_image(uploaded_file)
-    if image is None:
-        st.stop()  # If there's an error opening the image, stop here
+    if uploaded_file is not None:
+        # Afficher l'image originale
+        image = show_uploaded_image(uploaded_file)
+        if image is None:
+            st.stop()
 
-    # 3. Optional preprocessing (e.g., grayscale + threshold)
-    preprocessed_image = preprocess_image(image, grayscale=True, threshold=False)
-    st.image(preprocessed_image, caption="Preprocessed Image", use_column_width=True)
+        # Prétraiter l'image
+        preprocessed_image = preprocess_image(image, grayscale=True, threshold=False)
+        st.image(preprocessed_image, caption="Image prétraitée", use_column_width=True)
 
-    # 4. Perform OCR
-    #    You can reuse the same reader for multiple images if needed
-    reader = initialize_reader(['fr'])  
-    ocr_result = perform_ocr(preprocessed_image, reader=reader, detail=1)
+        # Bouton pour déclencher l'OCR
+        if st.button("Extraire le texte"):
+            with st.spinner("Extraction du texte en cours..."):
+                # Initialiser le lecteur et effectuer l'OCR
+                reader = initialize_reader(['fr'])
+                ocr_result = perform_ocr(preprocessed_image, reader=reader, detail=1)
 
-    # 5. Group lines by row
-    merged_lines = group_lines_by_row(ocr_result, y_threshold=10)
+                # Regrouper les lignes
+                merged_lines = group_lines_by_row(ocr_result, y_threshold=10)
 
-    # 6. Parse merged lines into structured data
-    parsed_data = parse_merged_lines(merged_lines)
+                # Afficher les résultats
+                display_ocr_data(merged_lines)
 
-    # 7. Display final output
-    display_ocr_data(merged_lines, parsed_data)
+if __name__ == "__main__":
+    main()
