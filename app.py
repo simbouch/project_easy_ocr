@@ -10,7 +10,7 @@ from frontend.display import show_uploaded_image, display_ocr_data
 
 def main():
     """Lance l'application OCR pour reçus français avec EasyOCR dans Streamlit."""
-    st.title("OCR amélioré pour reçus français")
+    st.title("OCR avec Easy OCR, essayons-le : téléchargez des reçus et extrayez le texte.")
 
     # Téléchargeur de fichier
     uploaded_file = st.file_uploader("Téléchargez une image de reçu", type=["png", "jpg", "jpeg"])
