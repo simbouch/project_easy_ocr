@@ -1,28 +1,15 @@
 import easyocr
 import numpy as np
 from PIL import Image, ImageOps
+import re
+from fuzzywuzzy import fuzz
 
 def initialize_reader(languages=None):
-    """
-    Initialise le lecteur EasyOCR avec les langues spécifiées.
-    Par défaut en français si aucune langue n'est fournie.
-    """
     if languages is None:
-        languages = ['fr']  # Par défaut en français
-    return easyocr.Reader(languages, gpu=False)  # gpu=True si GPU compatible
+        languages = ['fr']
+    return easyocr.Reader(languages, gpu=False)
 
 def preprocess_image(image: Image.Image, grayscale: bool = True, threshold: bool = False) -> Image.Image:
-    """
-    Prétraite l'image pour améliorer les résultats OCR.
-    
-    Args:
-        image (PIL.Image.Image): L'image d'entrée.
-        grayscale (bool): Convertit en niveaux de gris si True.
-        threshold (bool): Applique un seuil binaire si True.
-    
-    Returns:
-        PIL.Image.Image: Image prétraitée.
-    """
     if grayscale:
         image = ImageOps.grayscale(image)
     if threshold:
@@ -30,46 +17,22 @@ def preprocess_image(image: Image.Image, grayscale: bool = True, threshold: bool
     return image
 
 def perform_ocr(image: Image.Image, reader=None, detail: int = 1) -> list:
-    """
-    Effectue l'OCR sur une image PIL avec EasyOCR.
-    
-    Args:
-        image (PIL.Image.Image): L'image d'entrée.
-        reader (easyocr.Reader): Lecteur EasyOCR initialisé. Par défaut en français si None.
-        detail (int): 0 = texte uniquement, 1 = (bbox, texte, confiance).
-    
-    Returns:
-        list: Résultat OCR sous forme [(bbox, texte, confiance), ...] si detail=1.
-    """
     if reader is None:
-        reader = initialize_reader()  # Par défaut en français
+        reader = initialize_reader()
     image_np = np.array(image)
     result = reader.readtext(image_np, detail=detail)
     return result
 
 def group_lines_by_row(ocr_data, y_threshold=10) -> list:
-    """
-    Regroupe les lignes de texte reconnues par leur coordonnée y approximative.
-    
-    Args:
-        ocr_data (list): Liste de tuples (bbox, texte, confiance).
-        y_threshold (int): Distance max en pixels pour considérer un texte sur la même ligne.
-    
-    Returns:
-        list: Liste de chaînes de texte fusionnées.
-    """
     lines = []
-    
     for (bbox, text, conf) in ocr_data:
         ys = [point[1] for point in bbox]
         avg_y = sum(ys) / len(ys)
-        
         matched_line = None
         for line in lines:
             if abs(line['y'] - avg_y) <= y_threshold:
                 matched_line = line
                 break
-        
         if matched_line:
             matched_line['items'].append((text, conf))
             matched_line['y'] = (
@@ -78,10 +41,72 @@ def group_lines_by_row(ocr_data, y_threshold=10) -> list:
         else:
             lines.append({'y': avg_y, 'items': [(text, conf)]})
     
-    # Fusionner les éléments de texte en chaînes simples
     merged_lines = []
     for line in sorted(lines, key=lambda x: x['y']):
         merged_text = " ".join(txt for txt, _ in line['items'])
         merged_lines.append(merged_text)
-    
     return merged_lines
+
+def extract_total(merged_lines) -> float:
+    total_keywords = ["total", "montant total", "à payer", "somme", "net à payer", "total ttc"]
+    number_pattern = r"(\d+\s*[,.\s]\s*\d{1,2}|\d+)"
+    
+    # Debug: Afficher les lignes pour vérification
+    print("Lignes OCR reçues :")
+    for line in merged_lines:
+        print(f"- {line}")
+    
+    for i, line in enumerate(merged_lines):
+        line_lower = line.lower().strip()
+        for keyword in total_keywords:
+            if fuzz.partial_ratio(keyword, line_lower) > 70:
+                match = re.search(number_pattern, line)
+                if match:
+                    total_str = match.group(0).replace(" ", "").replace(",", ".")
+                    print(f"Total trouvé dans la ligne '{line}': {total_str}")
+                    try:
+                        return float(total_str)
+                    except ValueError:
+                        continue
+                if i + 1 < len(merged_lines):
+                    next_line = merged_lines[i + 1]
+                    match = re.search(number_pattern, next_line)
+                    if match:
+                        total_str = match.group(0).replace(" ", "").replace(",", ".")
+                        print(f"Total trouvé dans la ligne suivante '{next_line}': {total_str}")
+                        try:
+                            return float(total_str)
+                        except ValueError:
+                            continue
+    
+    numbers = []
+    for line in merged_lines[-5:]:
+        matches = re.findall(number_pattern, line)
+        for match in matches:
+            total_str = match.replace(" ", "").replace(",", ".")
+            try:
+                numbers.append(float(total_str))
+            except ValueError:
+                continue
+    
+    if numbers:
+        filtered_numbers = [n for n in numbers if n > 10]
+        if filtered_numbers:
+            total = max(filtered_numbers)
+            print(f"Total estimé (fallback) : {total}")
+            return total
+    
+    print("Aucun total détecté.")
+    return None
+
+def store_total(total: float, storage_list: list = None, filename: str = "totals.txt"):
+    if total is None:
+        print("Rien à stocker : total est None")
+        return
+    
+    print(f"Stockage du total : {total}")
+    if storage_list is not None:
+        storage_list.append(total)
+    
+    with open(filename, "a") as f:
+        f.write(f"{total:.2f}\n")
