@@ -20,93 +20,61 @@ def perform_ocr(image: Image.Image, reader=None, detail: int = 1) -> list:
     if reader is None:
         reader = initialize_reader()
     image_np = np.array(image)
-    result = reader.readtext(image_np, detail=detail)
-    return result
+    return reader.readtext(image_np, detail=detail)
 
 def group_lines_by_row(ocr_data, y_threshold=10) -> list:
     lines = []
     for (bbox, text, conf) in ocr_data:
-        ys = [point[1] for point in bbox]
+        ys = [pt[1] for pt in bbox]
         avg_y = sum(ys) / len(ys)
-        matched_line = None
-        for line in lines:
-            if abs(line['y'] - avg_y) <= y_threshold:
-                matched_line = line
+        # find matching row
+        for row in lines:
+            if abs(row['y'] - avg_y) <= y_threshold:
+                row['items'].append((text, conf))
+                row['y'] = (row['y'] * (len(row['items']) - 1) + avg_y) / len(row['items'])
                 break
-        if matched_line:
-            matched_line['items'].append((text, conf))
-            matched_line['y'] = (
-                matched_line['y'] * (len(matched_line['items']) - 1) + avg_y
-            ) / len(matched_line['items'])
         else:
             lines.append({'y': avg_y, 'items': [(text, conf)]})
-    
-    merged_lines = []
-    for line in sorted(lines, key=lambda x: x['y']):
-        merged_text = " ".join(txt for txt, _ in line['items'])
-        merged_lines.append(merged_text)
-    return merged_lines
+    # merge text
+    merged = [" ".join(txt for txt, _ in sorted(r['items'], key=lambda x: x[0])) 
+              for r in sorted(lines, key=lambda x: x['y'])]
+    return merged
 
 def extract_total(merged_lines) -> float:
     total_keywords = ["total", "montant total", "à payer", "somme", "net à payer", "total ttc"]
-    number_pattern = r"(\d+\s*[,.\s]\s*\d{1,2}|\d+)"
-    
-    # Debug: Afficher les lignes pour vérification
-    print("Lignes OCR reçues :")
-    for line in merged_lines:
-        print(f"- {line}")
-    
+    num_pat = r"(\d+\s*[,.\s]\s*\d{1,2}|\d+)"
     for i, line in enumerate(merged_lines):
-        line_lower = line.lower().strip()
-        for keyword in total_keywords:
-            if fuzz.partial_ratio(keyword, line_lower) > 70:
-                match = re.search(number_pattern, line)
-                if match:
-                    total_str = match.group(0).replace(" ", "").replace(",", ".")
-                    print(f"Total trouvé dans la ligne '{line}': {total_str}")
-                    try:
-                        return float(total_str)
-                    except ValueError:
-                        continue
-                if i + 1 < len(merged_lines):
-                    next_line = merged_lines[i + 1]
-                    match = re.search(number_pattern, next_line)
-                    if match:
-                        total_str = match.group(0).replace(" ", "").replace(",", ".")
-                        print(f"Total trouvé dans la ligne suivante '{next_line}': {total_str}")
-                        try:
-                            return float(total_str)
-                        except ValueError:
-                            continue
-    
-    numbers = []
+        low = line.lower()
+        if any(fuzz.partial_ratio(k, low) > 70 for k in total_keywords):
+            # try same line
+            m = re.search(num_pat, line)
+            if m:
+                s = m.group(0).replace(" ", "").replace(",", ".")
+                try: return float(s)
+                except: pass
+            # try next line
+            if i+1 < len(merged_lines):
+                m = re.search(num_pat, merged_lines[i+1])
+                if m:
+                    s = m.group(0).replace(" ", "").replace(",", ".")
+                    try: return float(s)
+                    except: pass
+    # fallback: largest number in last 5 lines
+    nums = []
     for line in merged_lines[-5:]:
-        matches = re.findall(number_pattern, line)
-        for match in matches:
-            total_str = match.replace(" ", "").replace(",", ".")
-            try:
-                numbers.append(float(total_str))
-            except ValueError:
-                continue
-    
-    if numbers:
-        filtered_numbers = [n for n in numbers if n > 10]
-        if filtered_numbers:
-            total = max(filtered_numbers)
-            print(f"Total estimé (fallback) : {total}")
-            return total
-    
-    print("Aucun total détecté.")
+        for m in re.findall(num_pat, line):
+            s = m.replace(" ", "").replace(",", ".")
+            try: nums.append(float(s))
+            except: pass
+    if nums:
+        cand = [n for n in nums if n > 10]
+        return max(cand) if cand else max(nums)
     return None
 
 def store_total(total: float, storage_list: list = None, filename: str = "totals.txt"):
     if total is None:
-        print("Rien à stocker : total est None")
         return
-    
-    print(f"Stockage du total : {total}")
     if storage_list is not None:
         storage_list.append(total)
-    
     with open(filename, "a") as f:
         f.write(f"{total:.2f}\n")
