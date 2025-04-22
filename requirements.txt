@@ -3,3 +3,4 @@ easyocr
 pillow
 numpy
 fuzzywuzzy
+optree>=0.13.0

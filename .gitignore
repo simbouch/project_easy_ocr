@@ -70,7 +70,13 @@ instance/
 
 # Sphinx documentation
 docs/_build/
-
+3.jpg
+2.jpg
+1.jpg
+myenv
+4.jpg
+fleur.jpg
+totals.txt
 # PyBuilder
 .pybuilder/
 target/
