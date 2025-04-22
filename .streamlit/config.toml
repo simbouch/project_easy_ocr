@@ -1,0 +1,3 @@
+[server]
+# turn off the default watcher that introspects every module
+fileWatcherType = "none"
